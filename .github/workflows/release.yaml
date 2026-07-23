@@ -5,7 +5,7 @@ jobs:
     name: release linux/amd64
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@master
+      - uses: actions/checkout@v4
       - name: compile and release
         uses: ngs/go-release.action@v1.0.1
         env:
@@ -16,7 +16,7 @@ jobs:
     name: release linux/amd64
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@master
+      - uses: actions/checkout@v4
       - name: compile and release
         uses: ngs/go-release.action@v1.0.1
         env:
@@ -27,7 +27,7 @@ jobs:
     name: release darwin/amd64
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@master
+      - uses: actions/checkout@v4
       - name: compile and release
         uses: ngs/go-release.action@v1.0.1
         env:
@@ -38,7 +38,7 @@ jobs:
     name: release windows/amd64
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@master
+      - uses: actions/checkout@v4
       - name: compile and release
         uses: ngs/go-release.action@v1.0.1
         env:

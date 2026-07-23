@@ -1,20 +1,20 @@
 package main
 
 import (
+	"context"
 	"encoding/base64"
 	"flag"
 	"fmt"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/ecr"
-	"github.com/aws/aws-sdk-go/service/sts"
 	"math/rand"
 	"os"
 	"strings"
-)
 
-var token string
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/ecr"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
+)
 
 func main() {
 	registryId := flag.String("registryId", "", "RegistryId")
@@ -24,72 +24,75 @@ func main() {
 
 	flag.Parse()
 
-	session, err := getAssumedSession(*roleArn, *externalId, *region)
+	ctx := context.Background()
+
+	cfg, err := getAssumedConfig(ctx, *roleArn, *externalId, *region)
 	if err != nil {
 		fmt.Println(err.Error())
 		os.Exit(1)
 	}
 
-	authToken, err := getEcrToken(session, *registryId, *region)
+	token, err := getEcrToken(ctx, cfg, *registryId)
 	if err != nil {
 		fmt.Println(err.Error())
 		os.Exit(1)
 	}
 
-	for _, data := range authToken.AuthorizationData {
-		output, err := base64.StdEncoding.DecodeString(*data.AuthorizationToken)
-		if err != nil {
-			fmt.Println(err.Error())
-			os.Exit(1)
-		}
-		split := strings.Split(string(output), ":")
-		if len(split) == 2 {
-			token = strings.TrimSpace(split[1])
-		} else {
-			fmt.Println("failed to parse token")
-			os.Exit(1)
-		}
-	}
-	if token == "" {
-		fmt.Println("password was empty")
-		os.Exit(1)
-	}
 	fmt.Printf("%s", token)
 }
 
-func getAssumedSession(roleArn, externalId, region string) (*session.Session, error) {
-	initSession := session.Must(session.NewSession(&aws.Config{
-		Region: aws.String(region),
-	}))
-	awsSts := sts.New(initSession)
+func getAssumedConfig(ctx context.Context, roleArn, externalId, region string) (aws.Config, error) {
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(region))
+	if err != nil {
+		return aws.Config{}, err
+	}
+
+	stsClient := sts.NewFromConfig(cfg)
 	sessionName := fmt.Sprintf("spinnakerManagedEcr-%d", rand.Int())
-	assumedRole, err := awsSts.AssumeRole(&sts.AssumeRoleInput{
+
+	input := &sts.AssumeRoleInput{
 		RoleArn:         aws.String(roleArn),
 		RoleSessionName: aws.String(sessionName),
-		ExternalId:  aws.String(externalId),
-	})
-	if err != nil {
-		return nil, err
 	}
-	return session.NewSession(&aws.Config{
-		Credentials:   credentials.NewStaticCredentials(
+	if externalId != "" {
+		input.ExternalId = aws.String(externalId)
+	}
+
+	assumedRole, err := stsClient.AssumeRole(ctx, input)
+	if err != nil {
+		return aws.Config{}, err
+	}
+
+	return config.LoadDefaultConfig(ctx,
+		config.WithRegion(region),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
 			*assumedRole.Credentials.AccessKeyId,
 			*assumedRole.Credentials.SecretAccessKey,
-			*assumedRole.Credentials.SessionToken),
-		Region:        aws.String(region),
-	})
+			*assumedRole.Credentials.SessionToken,
+		)),
+	)
 }
 
-func getEcrToken(session *session.Session, registry, region string) (*ecr.GetAuthorizationTokenOutput, error) {
-	ecrClient := ecr.New(session, &aws.Config{
-		Region: aws.String(region),
+func getEcrToken(ctx context.Context, cfg aws.Config, registry string) (string, error) {
+	ecrClient := ecr.NewFromConfig(cfg)
+
+	authOutput, err := ecrClient.GetAuthorizationToken(ctx, &ecr.GetAuthorizationTokenInput{
+		RegistryIds: []string{registry},
 	})
-	inputAuthToken := &ecr.GetAuthorizationTokenInput{
-		RegistryIds: []*string{aws.String(registry)},
-	}
-	authToken, err := ecrClient.GetAuthorizationToken(inputAuthToken)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	return authToken, nil
+
+	for _, data := range authOutput.AuthorizationData {
+		decoded, err := base64.StdEncoding.DecodeString(*data.AuthorizationToken)
+		if err != nil {
+			return "", err
+		}
+		parts := strings.Split(string(decoded), ":")
+		if len(parts) == 2 {
+			return strings.TrimSpace(parts[1]), nil
+		}
+		return "", fmt.Errorf("failed to parse token")
+	}
+	return "", fmt.Errorf("password was empty")
 }
