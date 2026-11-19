@@ -2,6 +2,8 @@ module ecr-token
 
 go 1.24
 
+toolchain go1.26.11
+
 require (
 	github.com/aws/aws-sdk-go-v2 v1.43.0
 	github.com/aws/aws-sdk-go-v2/config v1.32.31
